@@ -583,6 +583,11 @@ pub fn get_delta(config: &PlayoutConfig, begin: &f64) -> (f64, f64) {
     (current_delta, total_delta)
 }
 
+/// memepipe: seconds each (re)started output bursts at full speed before
+/// throttling to realtime — fills the DVR window fast so watch-party viewers
+/// can hold a deep coast buffer without the player slowing down.
+const READRATE_INITIAL_BURST_SECS: u32 = 8;
+
 pub fn insert_readrate(options: &[String], args: &mut Vec<String>, rate: f64) {
     let mut i = 0;
     while i < args.len() {
@@ -590,21 +595,17 @@ pub fn insert_readrate(options: &[String], args: &mut Vec<String>, rate: f64) {
             args.insert(i, rate.to_string());
             args.insert(i, "-readrate".to_string());
 
-            // memepipe: optional initial burst. Each seek/start restarts this
-            // output process, so a burst lets ffmpeg fill the DVR window fast
-            // before throttling to `rate` — viewers can then hold a deep
-            // coast buffer without the player ever slowing down. Enabled by
-            // putting "-readrate_initial_burst <seconds>" in
-            // general.ffmpeg_options; the value after the flag is read here.
-            if let Some(p) = options
-                .iter()
-                .position(|o| o.as_str() == "-readrate_initial_burst")
-            {
-                if let Some(val) = options.get(p + 1) {
-                    args.insert(i, val.clone());
-                    args.insert(i, "-readrate_initial_burst".to_string());
-                }
-            }
+            // memepipe: burst the first N seconds at full speed before
+            // throttling to `rate`. Each seek/start restarts this output
+            // process (the stager's putAndBoot), so the burst re-fills the
+            // DVR window fast and viewers hold a deep coast buffer with NO
+            // player slow-down. We bake ffmpeg >= 6.1 (supports the flag), so
+            // it's added unconditionally. NOTE: `options` is ffplayout's
+            // parsed list of ffmpeg's SUPPORTED option *names* (from
+            // `ffmpeg -h long`), not a value store — that's why the length is
+            // a constant, exactly like -readrate_catchup's 1.5 below.
+            args.insert(i, READRATE_INITIAL_BURST_SECS.to_string());
+            args.insert(i, "-readrate_initial_burst".to_string());
 
             if options.contains(&"-readrate_catchup".to_string()) {
                 args.insert(i, 1.5.to_string());
