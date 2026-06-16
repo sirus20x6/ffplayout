@@ -74,6 +74,14 @@ pub fn prepare_output_cmd(
     filters: &Option<Filters>,
 ) -> Vec<String> {
     let mut output_params = config.output.clone().output_cmd.unwrap();
+
+    // In full copy mode (video and audio passthrough), skip all filter/mapping logic
+    // Just append the output parameters directly
+    if config.processing.copy_video && config.processing.copy_audio {
+        cmd.append(&mut output_params);
+        return cmd;
+    }
+
     let mut new_params = vec![];
     let mut count = 0;
     let re_v = Regex::new(r"\[?0:v(:0)?\]?").unwrap();
@@ -581,6 +589,22 @@ pub fn insert_readrate(options: &[String], args: &mut Vec<String>, rate: f64) {
         if args[i] == "-i" {
             args.insert(i, rate.to_string());
             args.insert(i, "-readrate".to_string());
+
+            // memepipe: optional initial burst. Each seek/start restarts this
+            // output process, so a burst lets ffmpeg fill the DVR window fast
+            // before throttling to `rate` — viewers can then hold a deep
+            // coast buffer without the player ever slowing down. Enabled by
+            // putting "-readrate_initial_burst <seconds>" in
+            // general.ffmpeg_options; the value after the flag is read here.
+            if let Some(p) = options
+                .iter()
+                .position(|o| o.as_str() == "-readrate_initial_burst")
+            {
+                if let Some(val) = options.get(p + 1) {
+                    args.insert(i, val.clone());
+                    args.insert(i, "-readrate_initial_burst".to_string());
+                }
+            }
 
             if options.contains(&"-readrate_catchup".to_string()) {
                 args.insert(i, 1.5.to_string());

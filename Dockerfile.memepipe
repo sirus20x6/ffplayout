@@ -1,0 +1,37 @@
+# Multi-stage build of the memepipe-patched ffplayout — a fork of upstream
+# v1.1.0 on branch `memepipe`. Two deltas vs upstream:
+#   1. Full copy-mode passthrough: skip all filter/mapping logic when
+#      copy_video && copy_audio (engine/src/player/filter/mod.rs and
+#      utils/mod.rs::prepare_output_cmd). The memepipe pipeline stream-
+#      copies an already-H.264+AAC staged file, so the filter graph is
+#      pure overhead / a source of bad -map args.
+#   2. -readrate_initial_burst support in insert_readrate: each playout
+#      (re)start bursts the DVR window full before throttling to realtime,
+#      so viewers hold a deep coast buffer with NO player slow-down.
+#      Enabled per-channel via general.ffmpeg_options.
+#
+# Built Rust-only: --no-default-features drops the embed_frontend feature
+# (no Node/npm, no admin web UI — we drive ffplayout entirely over its API
+# from the stager). SQLX_OFFLINE uses the committed .sqlx query cache, so
+# no database is needed at build time. rust:alpine targets musl natively,
+# matching the upstream release artifact.
+
+FROM rust:1-alpine AS builder
+RUN apk add --no-cache musl-dev build-base pkgconfig perl make \
+    openssl-dev openssl-libs-static
+WORKDIR /src
+COPY . .
+ENV SQLX_OFFLINE=true
+RUN cargo build --release --no-default-features -p ffplayout
+
+FROM alpine:3.22
+ENV DB=/db
+RUN apk add --no-cache ffmpeg sqlite font-dejavu ca-certificates
+COPY --from=builder /src/target/release/ffplayout /usr/bin/ffplayout
+RUN mkdir -p /usr/share/ffplayout
+COPY assets/dummy.vtt assets/logo.png assets/DejaVuSans.ttf assets/FONT_LICENSE.txt /usr/share/ffplayout/
+COPY run.sh /run.sh
+RUN chmod +x /run.sh && mkdir -p ${DB}
+EXPOSE 8787
+VOLUME ["/db", "/tv-media", "/playlists", "/public", "/logging"]
+CMD ["/run.sh"]

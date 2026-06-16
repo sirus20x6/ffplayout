@@ -243,6 +243,14 @@ impl Filters {
     }
 
     pub fn map(&mut self) -> Vec<String> {
+        // In copy mode for encoder, don't add any mapping - let ffmpeg handle it automatically
+        if self.unit == Encoder
+            && self.config.processing.copy_video
+            && self.config.processing.copy_audio
+        {
+            return vec![];
+        }
+
         if (!self.output_chain.is_empty() && self.config.processing.override_filter)
             || (self
                 .config
@@ -732,7 +740,13 @@ pub async fn filter_chains(
     }
 
     if node.unit == Encoder {
-        if !config.processing.audio_only {
+        // When using copy mode for both video and audio, skip filter processing
+        // as the encoder will just pass through the stream from the pipe
+        if config.processing.copy_video && config.processing.copy_audio {
+            return filters;
+        }
+
+        if !config.processing.audio_only && !config.processing.copy_video {
             add_text(config, &mut filters, node, filter_chain).await;
         }
 
