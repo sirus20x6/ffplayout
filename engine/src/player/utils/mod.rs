@@ -595,6 +595,17 @@ pub fn insert_readrate(options: &[String], args: &mut Vec<String>, rate: f64) {
             args.insert(i, rate.to_string());
             args.insert(i, "-readrate".to_string());
 
+            // memepipe: generate PTS for packets that arrive without one. At
+            // a playlist->ingest switch the two MPEG-TS byte streams are
+            // spliced raw; when the cut lands mid-PES the encoder's first
+            // packet has no PTS and the FLV muxer treats that as FATAL
+            // ("Packet is missing PTS") -- the encoder dies, the ingest pipe
+            // collapses, and the pusher sees an RTMP reset. Observed live
+            // 2026-07-10 as an every-switch crash loop; whether a switch
+            // survives without this is boundary roulette.
+            args.insert(i, "+genpts+igndts+discardcorrupt".to_string());
+            args.insert(i, "-fflags".to_string());
+
             // memepipe: burst the first N seconds at full speed before
             // throttling to `rate`. Each seek/start restarts this output
             // process (the stager's putAndBoot), so the burst re-fills the
