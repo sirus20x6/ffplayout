@@ -1,3 +1,42 @@
+<script setup lang="ts">
+import VirtualList from 'vue-virtual-sortable'
+
+import { ref, onMounted, watch } from 'vue'
+import { useWindowSize } from '@vueuse/core'
+import { storeToRefs } from 'pinia'
+
+import { stringFormatter } from '@/composables/helper'
+import { useConfig } from '@/stores/config'
+import { useMedia } from '@/stores/media'
+
+const { width } = useWindowSize({ initialWidth: 800 })
+const { secToHMS, mediaType } = stringFormatter()
+
+const configStore = useConfig()
+const mediaStore = useMedia()
+const { i } = storeToRefs(useConfig())
+
+const dragGroup = ref({ name: 'dragGroup', pull: 'clone', put: false })
+
+defineProps({
+    preview: {
+        type: Function,
+        default() {
+            return ''
+        },
+    },
+})
+
+onMounted(async () => {
+    if (!mediaStore.folderTree.parent || !mediaStore.currentPath) {
+        await mediaStore.getTree('')
+    }
+})
+
+watch([i], () => {
+    mediaStore.getTree('')
+})
+</script>
 <template>
     <div class="h-full">
         <div v-if="mediaStore.isLoading" class="h-full w-full absolute z-10 flex justify-center bg-base-100/70">
@@ -5,7 +44,7 @@
         </div>
         <div class="bg-base-100 border-b border-base-content/30">
             <div v-if="mediaStore.folderTree.parent && mediaStore.crumbs">
-                <nav class="breadcrumbs px-2 py-[6px]">
+                <nav class="breadcrumbs px-2 py-1.5">
                     <ul>
                         <li v-for="(crumb, index) in mediaStore.crumbs" :key="index">
                             <button
@@ -101,42 +140,3 @@
         </div>
     </div>
 </template>
-<script setup lang="ts">
-import VirtualList from 'vue-virtual-draglist'
-
-import { ref, onMounted, watch } from 'vue'
-import { useWindowSize } from '@vueuse/core'
-import { storeToRefs } from 'pinia'
-
-import { stringFormatter } from '@/composables/helper'
-import { useConfig } from '@/stores/config'
-import { useMedia } from '@/stores/media'
-
-const { width } = useWindowSize({ initialWidth: 800 })
-const { secToHMS, mediaType } = stringFormatter()
-
-const configStore = useConfig()
-const mediaStore = useMedia()
-const { i } = storeToRefs(useConfig())
-
-const dragGroup = ref({ name: 'dragGroup', pull: 'clone', put: false })
-
-defineProps({
-    preview: {
-        type: Function,
-        default() {
-            return ''
-        },
-    },
-})
-
-onMounted(async () => {
-    if (!mediaStore.folderTree.parent || !mediaStore.currentPath) {
-        await mediaStore.getTree('')
-    }
-})
-
-watch([i], () => {
-    mediaStore.getTree('')
-})
-</script>

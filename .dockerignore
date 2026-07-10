@@ -1,0 +1,10 @@
+# Keep the build context lean — these are rebuilt inside the image or
+# irrelevant to the musl build.
+target/
+node_modules/
+frontend/node_modules/
+.git/
+*.bak-*
+# NOTE: frontend/dist/ is intentionally NOT ignored — we ship a small
+# committed stub there (build.rs is neutered, so npm never regenerates it)
+# to satisfy the compile-time include_dir! in serve/routes.rs.

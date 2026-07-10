@@ -1,6 +1,5 @@
-import { timezone } from 'dayjs/plugin/timezone.js';
 import type { JwtPayload } from 'jwt-decode'
-import type { AdvancedConfig } from './advanced_config'
+// import type { AdvancedConfig } from './advanced_config'
 import type { PlayoutConfig, Playlist as Ply } from './playout_config'
 
 export {}
@@ -57,6 +56,7 @@ declare global {
         admin?: boolean
         channel_ids?: number[]
         role_id?: number
+        two_factor: boolean
     }
 
     interface Crumb {
@@ -124,7 +124,7 @@ declare global {
         start: string
         duration: string
         shuffle: boolean
-        paths: string[]
+        paths: string[] | any[]
     }
 
     interface Template {

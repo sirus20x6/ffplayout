@@ -24,28 +24,30 @@ use tokio::{
     process::{ChildStderr, Command},
     sync::Mutex,
 };
+use tokio_util::sync::CancellationToken;
 
 pub mod import;
 pub mod json_serializer;
 pub mod json_validate;
 pub mod probe;
 
-use crate::player::{
-    controller::{
-        ChannelManager,
-        ProcessUnit::{self, *},
+use crate::{
+    player::{
+        controller::{
+            ChannelManager,
+            ProcessUnit::{self, *},
+        },
+        filter::{Filters, filter_chains},
     },
-    filter::{Filters, filter_chains},
-};
-use crate::utils::{
-    config::{FFMPEG_IGNORE_ERRORS, OutputMode::*, PlayoutConfig},
-    errors::ServiceError,
-    logging::{LogDedup, Target},
-    time_machine::time_now,
+    utils::{
+        config::{FFMPEG_IGNORE_ERRORS, OutputMode::*, PlayoutConfig},
+        errors::ServiceError,
+        logging::{LogDedup, Target},
+        time_machine::time_now,
+    },
+    vec_strings,
 };
 pub use json_serializer::{JsonPlaylist, read_json};
-
-use crate::vec_strings;
 
 /// Compare incoming stream name with expecting name, but ignore question mark.
 pub fn valid_stream(msg: &str) -> bool {
@@ -72,6 +74,14 @@ pub fn prepare_output_cmd(
     filters: &Option<Filters>,
 ) -> Vec<String> {
     let mut output_params = config.output.clone().output_cmd.unwrap();
+
+    // In full copy mode (video and audio passthrough), skip all filter/mapping logic
+    // Just append the output parameters directly
+    if config.processing.copy_video && config.processing.copy_audio {
+        cmd.append(&mut output_params);
+        return cmd;
+    }
+
     let mut new_params = vec![];
     let mut count = 0;
     let re_v = Regex::new(r"\[?0:v(:0)?\]?").unwrap();
@@ -573,12 +583,40 @@ pub fn get_delta(config: &PlayoutConfig, begin: &f64) -> (f64, f64) {
     (current_delta, total_delta)
 }
 
+/// memepipe: seconds each (re)started output bursts at full speed before
+/// throttling to realtime — fills the DVR window fast so watch-party viewers
+/// can hold a deep coast buffer without the player slowing down.
+const READRATE_INITIAL_BURST_SECS: u32 = 8;
+
 pub fn insert_readrate(options: &[String], args: &mut Vec<String>, rate: f64) {
     let mut i = 0;
     while i < args.len() {
         if args[i] == "-i" {
             args.insert(i, rate.to_string());
             args.insert(i, "-readrate".to_string());
+
+            // memepipe: generate PTS for packets that arrive without one. At
+            // a playlist->ingest switch the two MPEG-TS byte streams are
+            // spliced raw; when the cut lands mid-PES the encoder's first
+            // packet has no PTS and the FLV muxer treats that as FATAL
+            // ("Packet is missing PTS") -- the encoder dies, the ingest pipe
+            // collapses, and the pusher sees an RTMP reset. Observed live
+            // 2026-07-10 as an every-switch crash loop; whether a switch
+            // survives without this is boundary roulette.
+            args.insert(i, "+genpts+igndts+discardcorrupt".to_string());
+            args.insert(i, "-fflags".to_string());
+
+            // memepipe: burst the first N seconds at full speed before
+            // throttling to `rate`. Each seek/start restarts this output
+            // process (the stager's putAndBoot), so the burst re-fills the
+            // DVR window fast and viewers hold a deep coast buffer with NO
+            // player slow-down. We bake ffmpeg >= 6.1 (supports the flag), so
+            // it's added unconditionally. NOTE: `options` is ffplayout's
+            // parsed list of ffmpeg's SUPPORTED option *names* (from
+            // `ffmpeg -h long`), not a value store — that's why the length is
+            // a constant, exactly like -readrate_catchup's 1.5 below.
+            args.insert(i, READRATE_INITIAL_BURST_SECS.to_string());
+            args.insert(i, "-readrate_initial_burst".to_string());
 
             if options.contains(&"-readrate_catchup".to_string()) {
                 args.insert(i, 1.5.to_string());
@@ -641,7 +679,12 @@ pub fn loop_image(config: &PlayoutConfig, node: &Media) -> Vec<String> {
                 node.out
             ]);
         } else if vtt_dummy.is_file() {
-            source_cmd.append(&mut vec_strings!["-i", vtt_dummy.to_string_lossy()]);
+            source_cmd.append(&mut vec_strings![
+                "-i",
+                vtt_dummy.to_string_lossy(),
+                "-t",
+                node.out
+            ]);
         } else {
             error!("WebVTT enabled, but no vtt or dummy file found!");
         }
@@ -690,7 +733,12 @@ pub fn loop_filler(config: &PlayoutConfig, node: &Media) -> Vec<String> {
                 node.out
             ]);
         } else if vtt_dummy.is_file() {
-            source_cmd.append(&mut vec_strings!["-i", vtt_dummy.to_string_lossy()]);
+            source_cmd.append(&mut vec_strings![
+                "-i",
+                vtt_dummy.to_string_lossy(),
+                "-t",
+                node.out
+            ]);
         } else {
             error!("WebVTT enabled, but no vtt or dummy file found!");
         }
@@ -890,11 +938,21 @@ pub async fn stderr_reader(
     ignore: Vec<String>,
     suffix: ProcessUnit,
     channel_id: i32,
+    cancel_token: CancellationToken,
 ) -> Result<(), ServiceError> {
     let mut lines = buffer.lines();
     let mut debup = LogDedup::new(suffix, channel_id);
 
-    while let Some(line) = lines.next_line().await? {
+    loop {
+        let line = tokio::select! {
+            _ = cancel_token.cancelled() => break,
+            line = lines.next_line() => line,
+        };
+
+        let Some(line) = line? else {
+            break;
+        };
+
         if FFMPEG_IGNORE_ERRORS.iter().any(|i| line.contains(*i))
             || ignore.iter().any(|i| line.contains(i))
         {

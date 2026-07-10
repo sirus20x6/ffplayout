@@ -5,6 +5,7 @@ export default {
     socketDisconnected: 'Message stream disconnected',
     alert: {
         wrongLogin: 'Incorrect login data!',
+        verificationSent: 'A verification code was sent to your email.',
     },
     button: {
         login: 'Login',
@@ -24,6 +25,11 @@ export default {
     input: {
         username: 'Username',
         password: 'Password',
+    },
+    verification: {
+        codePlaceholder: 'Verification code',
+        verify: 'Verify',
+        wrongCode: 'Incorrect verification code!',
     },
     system: {
         cpu: 'CPU',
@@ -245,6 +251,7 @@ export default {
         confirmPass: 'Confirm Password',
         save: 'Save',
         admin: 'Admin',
+        twoFactor: 'Two-factor authentication',
         deleteNotPossible: 'Delete current user not possible!',
         deleteSuccess: 'Delete user done!',
         deleteError: 'Delete user error',

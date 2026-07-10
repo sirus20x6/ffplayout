@@ -10,17 +10,18 @@ use sqlx::{Pool, Sqlite};
 #[cfg(target_family = "unix")]
 use tokio::fs;
 
-use crate::ARGS;
-use crate::db::{
-    handles,
-    models::{Channel, User},
+use crate::{
+    ARGS,
+    db::{
+        handles,
+        models::{Channel, User},
+    },
+    utils::{
+        advanced_config::AdvancedConfig,
+        config::{OutputMode, PlayoutConfig},
+        errors::ProcessError,
+    },
 };
-use crate::utils::{
-    advanced_config::AdvancedConfig,
-    config::{OutputMode, PlayoutConfig},
-};
-
-use super::errors::ProcessError;
 
 #[derive(Parser, Debug, Default, Clone)]
 #[clap(version,
@@ -51,6 +52,14 @@ pub struct Args {
     #[clap(short, long, help_heading = Some("Initial Setup"), help = "Admin password")]
     pub password: Option<String>,
 
+    #[clap(
+        long,
+        help_heading = Some("Initial Setup"),
+        help = "Enable two-factor authentication for admin user",
+        value_name = "TRUE/FALSE"
+    )]
+    pub two_factor: Option<bool>,
+
     #[clap(long, env, help_heading = Some("Initial Setup"), help = "SMTP server for system mails")]
     pub smtp_server: Option<String>,
 
@@ -80,6 +89,9 @@ pub struct Args {
 
     #[clap(long, help_heading = Some("General"), help = "Add or update a global admin user")]
     pub user_set: bool,
+
+    #[clap(long, help_heading = Some("General"), help = "Disabling two-factor authentication")]
+    pub disable_two_factor: bool,
 
     #[clap(long, env, help_heading = Some("General"), help = "Path to database file")]
     pub db: Option<PathBuf>,
@@ -207,6 +219,13 @@ fn global_user(args: &mut Args) {
 
     if args.mail.is_none() {
         args.mail = Text::new("Email:").prompt().ok();
+    }
+
+    if args.two_factor.is_none() {
+        args.two_factor = Confirm::new("Enable two-factor authentication?")
+            .with_default(true)
+            .prompt()
+            .ok();
     }
 }
 
@@ -378,6 +397,7 @@ pub async fn init_args(pool: &Pool<Sqlite>) -> Result<bool, ProcessError> {
             password: args.password.unwrap(),
             role_id: Some(1),
             channel_ids: Some(chl.clone()),
+            two_factor: args.two_factor.unwrap_or(true),
             token: None,
         };
 

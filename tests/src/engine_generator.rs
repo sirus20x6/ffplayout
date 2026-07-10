@@ -1,15 +1,17 @@
-use std::env;
+use std::{env, fs};
 
 use chrono::NaiveTime;
 use sqlx::sqlite::SqlitePoolOptions;
 
-use ffplayout::db::handles;
-use ffplayout::player::{controller::ChannelManager, utils::*};
-use ffplayout::utils::config::ProcessMode::Playlist;
-use ffplayout::utils::playlist::generate_playlist;
-use ffplayout::utils::{
-    config::{PlayoutConfig, Source, Template},
-    generator::*,
+use ffplayout::{
+    db::handles,
+    player::{controller::ChannelManager, utils::*},
+    utils::{
+        config::{PlayoutConfig, ProcessMode::Playlist, Source, Template},
+        generator::*,
+        playlist::generate_playlist,
+        system::SystemStat,
+    },
 };
 
 async fn prepare_config() -> (PlayoutConfig, ChannelManager) {
@@ -44,7 +46,7 @@ async fn prepare_config() -> (PlayoutConfig, ChannelManager) {
 
     let config = PlayoutConfig::new(&pool, 1, None).await.unwrap();
     let channel = handles::select_channel(&pool, &1).await.unwrap();
-    let manager = ChannelManager::new(pool, channel, config.clone()).await;
+    let manager = ChannelManager::new(pool, channel, config.clone(), SystemStat::new()).await;
 
     (config, manager)
 }
@@ -118,8 +120,10 @@ async fn test_generate_playlist_from_folder() {
     manager.update_config(config).await;
 
     let playlist = generate_playlist(manager).await;
+    let path_1 = current_path.join("assets/playlists/2023/09/2023-09-11.json");
 
     assert!(playlist.is_ok());
+    assert!(path_1.is_file());
 
     let total_duration = sum_durations(&playlist.unwrap().program);
 
@@ -127,6 +131,8 @@ async fn test_generate_playlist_from_folder() {
         total_duration > 86399.0 && total_duration < 86401.0,
         "total_duration is {total_duration}"
     );
+
+    fs::remove_file(path_1).expect("Delete test playlist");
 }
 
 #[tokio::test]
@@ -163,6 +169,10 @@ async fn test_generate_playlist_from_template() {
 
     let playlist = generate_playlist(manager).await;
 
+    let path_1 = current_path.join("assets/playlists/2023/09/2023-09-12.json");
+
+    assert!(path_1.is_file());
+
     assert!(playlist.is_ok());
 
     let total_duration = sum_durations(&playlist.unwrap().program);
@@ -171,4 +181,6 @@ async fn test_generate_playlist_from_template() {
         total_duration > 86399.0 && total_duration < 86401.0,
         "total_duration is {total_duration}"
     );
+
+    fs::remove_file(path_1).expect("Delete test playlist");
 }
